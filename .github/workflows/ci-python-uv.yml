@@ -44,12 +44,12 @@ jobs:
           persist-credentials: false
       - name: Set up uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
-      - name: Sync dependencies
-        run: uv sync --frozen || uv sync --all-extras --dev
+      # ruff is a standalone linter (no project import needed) — the paved path
+      # provides it via uvx so consumers don't have to declare it themselves.
       - name: Ruff check
-        run: uv run ruff check --output-format=github .
+        run: uvx ruff check --output-format=github .
       - name: Ruff format (check only)
-        run: uv run ruff format --check .
+        run: uvx ruff format --check .
 
   typecheck:
     name: typecheck (pyright)
@@ -66,10 +66,14 @@ jobs:
           persist-credentials: false
       - name: Set up uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      # --frozen alone installs only default deps; --all-extras --dev pulls the
+      # test/tooling deps whether the repo declares them as extras or a dev group.
       - name: Sync dependencies
-        run: uv sync --frozen || uv sync --all-extras --dev
+        run: uv sync --frozen --all-extras --dev || uv sync --all-extras --dev
+      # pyright needs the synced project env to resolve imports; the paved path
+      # provides pyright itself via --with so consumers need not declare it.
       - name: Pyright
-        run: uv run pyright
+        run: uv run --with pyright pyright
 
   test:
     name: test (py ${{ matrix.python-version }})
@@ -95,9 +99,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Sync dependencies
-        run: uv sync --frozen || uv sync --all-extras --dev
+        run: uv sync --frozen --all-extras --dev || uv sync --all-extras --dev
+      # pytest + the repo's own plugins come from the synced env; the paved path
+      # supplies pytest-cov so the coverage gate works even if unlisted.
       - name: Pytest (with coverage floor)
-        run: uv run pytest --cov --cov-fail-under=${{ inputs.cov-floor }}
+        run: uv run --with pytest-cov pytest --cov --cov-fail-under=${{ inputs.cov-floor }}
 
   bandit:
     name: bandit (SAST)
