@@ -1,0 +1,121 @@
+name: ci-go
+
+# Reusable Go CI.
+# Consume via: uses: itotallyforgot/.github/.github/workflows/ci-go.yml@v1
+#
+# Frozen aggregate check (required-status-check API surface): go-ci-passed
+# Do NOT rename go-ci-passed — rulesets reference it by name.
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: Go version to install.
+        type: string
+        default: "1.22"
+      working-directory:
+        description: Directory containing the Go module.
+        type: string
+        default: "."
+
+permissions: {}
+
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ inputs.go-version }}
+      - name: Verify modules
+        run: go mod verify
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race)
+        run: go test -race ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ inputs.go-version }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
+        with:
+          working-directory: ${{ inputs.working-directory }}
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ inputs.go-version }}
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Run govulncheck (blocking)
+        run: govulncheck ./...
+
+  # FROZEN AGGREGATE CHECK — required status check. Never rename.
+  go-ci-passed:
+    name: go-ci-passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - build-and-test
+      - lint
+      - govulncheck
+    steps:
+      - name: Assert all required Go CI jobs succeeded
+        env:
+          R_BUILD: ${{ needs.build-and-test.result }}
+          R_LINT: ${{ needs.lint.result }}
+          R_VULN: ${{ needs.govulncheck.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for pair in "build-and-test:$R_BUILD" "golangci-lint:$R_LINT" "govulncheck:$R_VULN"; do
+            name="${pair%%:*}"; res="${pair#*:}"
+            if [ "$res" != "success" ]; then
+              echo "::error::required job '$name' result=$res (expected success)"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "ci-go: FAILED"
+            exit 1
+          fi
+          echo "ci-go: all required jobs passed"

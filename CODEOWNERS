@@ -1,0 +1,6 @@
+# Code owners for the fleet's .github repo.
+# Workflow changes are the highest-blast-radius edits here, so they get an
+# explicit owner line ahead of the catch-all.
+
+/.github/workflows/  @itotallyforgot
+*                    @itotallyforgot

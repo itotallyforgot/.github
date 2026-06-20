@@ -1,0 +1,109 @@
+name: ci-node-pnpm
+
+# Reusable Node CI (pnpm-managed).
+# Consume via: uses: itotallyforgot/.github/.github/workflows/ci-node-pnpm.yml@v1
+#
+# Frozen aggregate check (required-status-check API surface): node-ci-passed
+# Do NOT rename node-ci-passed — rulesets reference it by name.
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the pnpm project.
+        type: string
+        default: app
+      node-version:
+        description: Node.js version to install.
+        type: string
+        default: "20"
+
+permissions: {}
+
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - name: Set up Node ${{ inputs.node-version }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: pnpm
+          cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  audit:
+    name: audit (pnpm)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - name: Set up Node ${{ inputs.node-version }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: pnpm
+          cache-dependency-path: ${{ inputs.working-directory }}/pnpm-lock.yaml
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Audit production deps (high+)
+        run: pnpm audit --prod --audit-level=high
+
+  # FROZEN AGGREGATE CHECK — required status check. Never rename.
+  node-ci-passed:
+    name: node-ci-passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - build-and-test
+      - audit
+    steps:
+      - name: Assert all required Node CI jobs succeeded
+        env:
+          R_BUILD: ${{ needs.build-and-test.result }}
+          R_AUDIT: ${{ needs.audit.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for pair in "build-and-test:$R_BUILD" "audit:$R_AUDIT"; do
+            name="${pair%%:*}"; res="${pair#*:}"
+            if [ "$res" != "success" ]; then
+              echo "::error::required job '$name' result=$res (expected success)"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "ci-node-pnpm: FAILED"
+            exit 1
+          fi
+          echo "ci-node-pnpm: all required jobs passed"

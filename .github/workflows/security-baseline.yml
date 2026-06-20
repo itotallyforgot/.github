@@ -1,0 +1,188 @@
+name: security-baseline
+
+# Reusable security baseline for the fleet.
+# Consume via: uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@v1
+#
+# Frozen aggregate check (required-status-check API surface): security-passed
+# Do NOT rename security-passed — rulesets reference it by name.
+
+on:
+  workflow_call:
+    inputs:
+      enable-deps-audit:
+        description: Run dependency-review on pull_request events.
+        type: boolean
+        default: true
+      fail-on-severity:
+        description: Minimum advisory severity that fails dependency-review.
+        type: string
+        default: high
+      enable-trufflehog:
+        description: Run a TruffleHog verified-secret scan in addition to gitleaks.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  harden-runner:
+    name: harden-runner (egress audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (audit egress)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history for secret scan)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  trufflehog:
+    name: trufflehog
+    runs-on: ubuntu-latest
+    if: ${{ inputs.enable-trufflehog }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run TruffleHog (verified secrets only)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/trufflesecurity/trufflehog:latest \
+            git file:///repo --only-verified --fail
+
+  zizmor:
+    name: zizmor (workflow static analysis)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Run zizmor against caller workflows
+        run: |
+          python -m pip install --upgrade zizmor
+          zizmor --format sarif .github/workflows > zizmor.sarif || true
+      - name: Upload zizmor SARIF
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+  dependency-review:
+    name: dependency-review
+    runs-on: ubuntu-latest
+    # Only meaningful on pull_request; skip otherwise (a non-PR run cannot diff a base).
+    if: ${{ inputs.enable-deps-audit && github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Dependency review
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: ${{ inputs.fail-on-severity }}
+
+  # FROZEN AGGREGATE CHECK — required status check. Never rename.
+  # Fails if any real job failed OR was skipped, so a path/condition skip
+  # cannot green-by-skip. dependency-review and trufflehog are intentionally
+  # conditional, so they are tolerated when skipped (see explicit handling).
+  security-passed:
+    name: security-passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - harden-runner
+      - gitleaks
+      - trufflehog
+      - zizmor
+      - dependency-review
+    steps:
+      - name: Assert all required security jobs succeeded
+        env:
+          R_HARDEN: ${{ needs.harden-runner.result }}
+          R_GITLEAKS: ${{ needs.gitleaks.result }}
+          R_TRUFFLEHOG: ${{ needs.trufflehog.result }}
+          R_ZIZMOR: ${{ needs.zizmor.result }}
+          R_DEPS: ${{ needs.dependency-review.result }}
+          DEPS_ENABLED: ${{ inputs.enable-deps-audit }}
+          TRUFFLEHOG_ENABLED: ${{ inputs.enable-trufflehog }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          fail=0
+
+          # Always-on jobs: must be success (skipped counts as failure).
+          for pair in "harden-runner:$R_HARDEN" "gitleaks:$R_GITLEAKS" "zizmor:$R_ZIZMOR"; do
+            name="${pair%%:*}"; res="${pair#*:}"
+            if [ "$res" != "success" ]; then
+              echo "::error::required job '$name' result=$res (expected success)"
+              fail=1
+            fi
+          done
+
+          # dependency-review: success when it should run; skipped only allowed
+          # when deps-audit is off OR the event is not pull_request.
+          if [ "$DEPS_ENABLED" = "true" ] && [ "$EVENT" = "pull_request" ]; then
+            if [ "$R_DEPS" != "success" ]; then
+              echo "::error::dependency-review result=$R_DEPS (expected success)"
+              fail=1
+            fi
+          else
+            if [ "$R_DEPS" != "skipped" ] && [ "$R_DEPS" != "success" ]; then
+              echo "::error::dependency-review result=$R_DEPS (expected skipped/success)"
+              fail=1
+            fi
+          fi
+
+          # trufflehog: success when enabled; skipped allowed only when disabled.
+          if [ "$TRUFFLEHOG_ENABLED" = "true" ]; then
+            if [ "$R_TRUFFLEHOG" != "success" ]; then
+              echo "::error::trufflehog result=$R_TRUFFLEHOG (expected success)"
+              fail=1
+            fi
+          else
+            if [ "$R_TRUFFLEHOG" != "skipped" ] && [ "$R_TRUFFLEHOG" != "success" ]; then
+              echo "::error::trufflehog result=$R_TRUFFLEHOG (expected skipped/success)"
+              fail=1
+            fi
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo "security-baseline: FAILED"
+            exit 1
+          fi
+          echo "security-baseline: all required jobs passed"

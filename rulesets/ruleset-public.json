@@ -1,0 +1,47 @@
+{
+  "_comment": "Wave-0 floor for PUBLIC repos. The required_status_checks list below is the FULL menu of frozen aggregate names. Before applying to a specific repo, PRUNE required_status_checks to only the archetype's checks per rulesets/README.md — an aggregate that never runs in that repo stays pending and blocks merge forever. _comment is stripped before POST.",
+  "name": "wave-0-floor-public",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["squash", "merge", "rebase"]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "security-passed" },
+          { "context": "ci-passed" },
+          { "context": "node-ci-passed" },
+          { "context": "go-ci-passed" },
+          { "context": "dotnet-ci-passed" },
+          { "context": "static-ci-passed" }
+        ]
+      }
+    }
+  ]
+}
