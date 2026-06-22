@@ -1,0 +1,21 @@
+# Canonical zizmor policy for repositories consuming the central secure-CI
+# paved path. Copy this file to your repository ROOT as `.zizmor.yml`.
+#
+# Why a policy is required:
+#   First-party reusable workflows are consumed through the floating `@v1` tag
+#   (a ref-pin, not a commit SHA) so the owner can ship a fix fleet-wide by
+#   moving the tag once. zizmor's `unpinned-uses` audit defaults to demanding a
+#   SHA hash-pin for every `uses:`. Without the exemption below, every
+#   `uses: itotallyforgot/...@v1` call is reported as an unpinned-uses finding.
+#
+# What this policy does:
+#   - itotallyforgot/*  ->  ref-pin   (tag pin allowed for first-party reusables)
+#   - *                 ->  hash-pin  (SHA pin still MANDATORY for third-party actions)
+#
+# Third-party actions inside your own bespoke jobs MUST stay SHA-pinned.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "itotallyforgot/*": ref-pin
+        "*": hash-pin
