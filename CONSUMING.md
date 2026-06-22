@@ -10,7 +10,7 @@ reusables. This page is the contract: copy the patterns verbatim.
   `v1` forward on each central release, so a fix lands fleet-wide without a PR
   to every repo.
 - Third-party actions are SHA-pinned **inside** the reusables. Consumers never
-  pin the reusables by SHA — they pin by the `@v1` ref (see `.zizmor.yml`).
+  pin the reusables by SHA — they pin by the `@v1` ref (see `.github/zizmor.yml`).
 - Each CI reusable emits one **frozen aggregate check** whose name is a stable
   required-status-check surface. Never reference internal job names in a
   ruleset — only the aggregate.
