@@ -1,5 +1,10 @@
 # Canonical zizmor policy for repositories consuming the central secure-CI
-# paved path. Copy this file to your repository ROOT as `.zizmor.yml`.
+# paved path. Copy this file to **.github/zizmor.yml** in your repository.
+#
+# IMPORTANT — location matters: zizmor (1.26+) auto-discovers `.github/zizmor.yml`
+# (and a root `zizmor.yml`), but it does NOT discover a root `.zizmor.yml`
+# dotfile. A `.zizmor.yml` at the repo root is silently ignored, so the policy
+# below would never apply to a local `zizmor` run. Use `.github/zizmor.yml`.
 #
 # Why a policy is required:
 #   First-party reusable workflows are consumed through the floating `@v1` tag

@@ -10,7 +10,7 @@ reusables. This page is the contract: copy the patterns verbatim.
   `v1` forward on each central release, so a fix lands fleet-wide without a PR
   to every repo.
 - Third-party actions are SHA-pinned **inside** the reusables. Consumers never
-  pin the reusables by SHA — they pin by the `@v1` ref (see `.zizmor.yml`).
+  pin the reusables by SHA — they pin by the `@v1` ref (see `.github/zizmor.yml`).
 - Each CI reusable emits one **frozen aggregate check** whose name is a stable
   required-status-check surface. Never reference internal job names in a
   ruleset — only the aggregate.
@@ -73,10 +73,16 @@ stay as **repo-local jobs** in this file: SHA-pin every action,
 `persist-credentials: false` on checkout, and grant the minimum `permissions:`
 per job (`security-events: write` only when uploading SARIF).
 
-## 3. zizmor policy — `.zizmor.yml`
+## 3. zizmor policy — `.github/zizmor.yml`
 
-Copy [`templates/.zizmor.yml`](templates/.zizmor.yml) to your repository root.
-Without it, every `@v1` caller is reported as an `unpinned-uses` finding.
+Copy [`templates/zizmor.yml`](templates/zizmor.yml) to **`.github/zizmor.yml`**.
+Without the policy, every `@v1` caller is reported as an `unpinned-uses` finding.
+
+Location matters: zizmor (1.26+) auto-discovers `.github/zizmor.yml` (and a root
+`zizmor.yml`), but **not** a root `.zizmor.yml` dotfile — a `.zizmor.yml` at the
+repo root is silently ignored. The security baseline injects this policy at scan
+time when no config is committed, so CI passes either way, but committing it to
+`.github/zizmor.yml` is what makes a local `zizmor` run correct.
 
 ## 4. Scorecard
 
