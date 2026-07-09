@@ -11,9 +11,7 @@ on:
     - cron: "0 6 * * *"   # 06:00 UTC daily
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: dependabot-sweep-${{ github.ref }}
@@ -22,6 +20,9 @@ concurrency:
 jobs:
   sweep:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable auto-merge on open Dependabot PRs
         env:
@@ -31,12 +32,13 @@ jobs:
           set -euo pipefail
           prs=$(gh pr list -R "$REPO" --author 'app/dependabot' --state open --json number --jq '.[].number')
           if [ -z "$prs" ]; then echo "No open Dependabot PRs."; exit 0; fi
+          failed=0
           for pr in $prs; do
             echo "::group::PR #$pr"
-            # Gated repos: enable auto-merge (waits for green). Ungated repos:
-            # --auto is rejected, so fall back to an immediate merge.
-            gh pr merge --auto --merge "$pr" -R "$REPO" \
-              || gh pr merge --merge "$pr" -R "$REPO" \
-              || echo "could not merge #$pr"
+            if ! gh pr merge --auto --squash "$pr" -R "$REPO"; then
+              echo "::error::could not enable gated auto-merge for #$pr"
+              failed=1
+            fi
             echo "::endgroup::"
           done
+          exit "$failed"

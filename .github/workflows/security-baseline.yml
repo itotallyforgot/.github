@@ -1,7 +1,7 @@
 name: security-baseline
 
 # Reusable security baseline for the fleet.
-# Consume via: uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@v1
+# Consume via an immutable commit SHA.
 #
 # Frozen aggregate check (required-status-check API surface): security-passed
 # Do NOT rename security-passed — rulesets reference it by name.
@@ -21,6 +21,10 @@ on:
         description: Run a TruffleHog verified-secret scan in addition to gitleaks.
         type: boolean
         default: false
+      enable-sarif-upload:
+        description: Upload SARIF to GitHub code scanning (requires GHAS for private repos).
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -45,6 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     steps:
       - name: Checkout (full history for secret scan)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -72,7 +77,8 @@ jobs:
           persist-credentials: false
       - name: Run TruffleHog (verified secrets only)
         run: |
-          docker run --rm -v "$PWD:/repo" ghcr.io/trufflesecurity/trufflehog:latest \
+          docker run --rm -v "$PWD:/repo:ro" \
+            ghcr.io/trufflesecurity/trufflehog@sha256:2233f7b95e2659c15de11715352e840397ce6d4553fe3d40e13e742e5b239be4 \
             git file:///repo --only-verified --fail
 
   zizmor:
@@ -92,28 +98,11 @@ jobs:
           python-version: "3.12"
       - name: Run zizmor against caller workflows
         run: |
-          python -m pip install --upgrade zizmor
-          # zizmor runs inside the CALLER's checkout, so a config committed only
-          # to this central repo is never present here. Inject the fleet
-          # paved-path policy unless the consumer ships its own zizmor config,
-          # then let zizmor auto-discover it. This exempts first-party reusable
-          # calls (itotallyforgot/*) pinned to the moving @v1 tag from
-          # unpinned-uses, while preserving SHA-pin enforcement for every
-          # third-party action ("*": hash-pin stays the default).
-          if [ ! -f .github/zizmor.yml ] && [ ! -f .github/zizmor.yaml ] \
-             && [ ! -f zizmor.yml ] && [ ! -f zizmor.yaml ]; then
-            mkdir -p .github
-            printf '%s\n' \
-              'rules:' \
-              '  unpinned-uses:' \
-              '    config:' \
-              '      policies:' \
-              '        itotallyforgot/*: ref-pin' \
-              '        "*": hash-pin' \
-              > .github/zizmor.yml
-          fi
-          zizmor --format sarif .github/workflows > zizmor.sarif || true
+          python -m pip install zizmor==1.26.1
+          zizmor --no-config --strict-collection --min-severity high \
+            --format sarif .github/workflows > zizmor.sarif
       - name: Upload zizmor SARIF
+        if: ${{ always() && inputs.enable-sarif-upload && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           sarif_file: zizmor.sarif
